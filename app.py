@@ -22,11 +22,11 @@ def load_pkl_from_drive(file_id):
     return pickle.loads(response.content)
 
 
-# Load similarity.pkl (your 176MB file)
+# Load similarity.pkl (176MB file hosted on Drive)
 similarity = load_pkl_from_drive("1IfFUDSYgb_x4pRT5z6jzjmd7yujrPM_Y")
 
-# Load movie_list.pkl from local file (update if needed)
-movies = pickle.load(open("movie_list.pkl", "rb"))
+# Load movie_list.pkl (from your second Drive link)
+movies = load_pkl_from_drive("1xdXiWr3ufitYng_TjkFT1CIUxA0JApNk")
 
 
 # ===============================
