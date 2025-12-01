@@ -1,107 +1,109 @@
 import pickle
-import streamlit as st
 import requests
-import time
-
-from requests.adapters import HTTPAdapter, Retry
-
-# ===============================
-#  REQUEST SESSION WITH RETRIES
-# ===============================
-session = requests.Session()
-retries = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
-session.mount("https://", HTTPAdapter(max_retries=retries))
+import streamlit as st
+import zipfile
+import io
 
 
-# ===============================
-#  LOAD PKL FILE FROM GOOGLE DRIVE
-# ===============================
-def load_pkl_from_drive(file_id):
-    url = f"https://drive.google.com/uc?export=download&id={file_id}"
-    response = requests.get(url)
-    return pickle.loads(response.content)
+# ---------------------------------------
+# DOWNLOAD & LOAD PKL FROM GITHUB ZIP
+# ---------------------------------------
+def load_pkl_from_github_zip(zip_url, pkl_name):
+    response = requests.get(zip_url, timeout=30)
+    if response.status_code != 200:
+        raise Exception("❌ Failed to download ZIP file")
+
+    z = zipfile.ZipFile(io.BytesIO(response.content))
+
+    if pkl_name not in z.namelist():
+        raise Exception(f"❌ {pkl_name} not found inside ZIP")
+
+    with z.open(pkl_name) as f:
+        return pickle.load(f)
 
 
-# Load similarity.pkl (176MB file hosted on Drive)
-similarity = load_pkl_from_drive("1IfFUDSYgb_x4pRT5z6jzjmd7yujrPM_Y")
+# ---------------------------------------
+# LOAD FILES
+# ---------------------------------------
+similarity = load_pkl_from_github_zip(
+    "https://github.com/bhawnadiya/movie_recommendation/releases/download/v1.0/similarity.zip",
+    "similarity.pkl"
+)
 
-# Load movie_list.pkl (from your second Drive link)
-movies = load_pkl_from_drive("1xdXiWr3ufitYng_TjkFT1CIUxA0JApNk")
+movies = load_pkl_from_github_zip(
+    "https://github.com/bhawnadiya/movie_recommendation/releases/download/v1.0/movie_list.zip",
+    "movie_list.pkl"
+)
+
+FALLBACK_POSTER = "https://via.placeholder.com/500x750?text=No+Image"
 
 
-# ===============================
-#  FETCH MOVIE POSTERS
-# ===============================
+# ---------------------------------------
+# FETCH POSTER
+# ---------------------------------------
 def fetch_poster(movie_id):
-    url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key=c85bd5e138da982cb0357638dafa815a&language=en-US"
-    print(f"Fetching poster for movie_id: {movie_id}")
+    api_key = "c85bd5e138da982cb0357638dafa815a"
+    url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key={api_key}&language=en-US"
 
     try:
-        response = session.get(url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        poster_path = data.get("poster_path")
+        data = requests.get(url, timeout=10).json()
+        path = data.get("poster_path")
 
-        if poster_path:
-            return "https://image.tmdb.org/t/p/w500/" + poster_path
+        if path and isinstance(path, str) and path.strip() != "":
+            return "https://image.tmdb.org/t/p/w500/" + path
         else:
-            return "default_image_url_here"
+            return FALLBACK_POSTER
 
-    except requests.exceptions.RequestException as e:
-        print(f"Failed for movie ID {movie_id}: {e}")
-        return "default_image_url_here"
+    except:
+        return FALLBACK_POSTER
 
 
-# ===============================
-#  MOVIE RECOMMENDATION LOGIC
-# ===============================
+# ---------------------------------------
+# RECOMMEND MOVIES
+# ---------------------------------------
 def recommend(movie):
     index = movies[movies['title'] == movie].index[0]
-    distances = sorted(list(enumerate(similarity[index])), reverse=True, key=lambda x: x[1])
+    distances = sorted(
+        list(enumerate(similarity[index])),
+        reverse=True,
+        key=lambda x: x[1],
+    )
 
-    recommended_movie_names = []
-    recommended_movie_posters = []
+    names = []
+    posters = []
 
     for i in distances[1:6]:
         movie_id = movies.iloc[i[0]].movie_id
-        recommended_movie_posters.append(fetch_poster(movie_id))
-        recommended_movie_names.append(movies.iloc[i[0]].title)
+        poster = fetch_poster(movie_id)
 
-    return recommended_movie_names, recommended_movie_posters
+        # FINAL SAFETY CHECK
+        if not poster or poster.strip() == "":
+            poster = FALLBACK_POSTER
+
+        posters.append(poster)
+        names.append(movies.iloc[i[0]].title)
+
+    return names, posters
 
 
-# ===============================
-#  STREAMLIT UI
-# ===============================
+# ---------------------------------------
+# STREAMLIT UI
+# ---------------------------------------
 st.header("🎬 Movie Recommender System")
 
-movie_list = movies['title'].values
-selected_movie = st.selectbox(
-    "Type or select a movie from the dropdown",
-    movie_list
-)
+movie_list = movies["title"].values
+selected_movie = st.selectbox("Choose a movie", movie_list)
 
 if st.button("Show Recommendation"):
     names, posters = recommend(selected_movie)
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    # DEBUG LOG — SEE POSTERS IN TERMINAL
+    print("\n=== POSTERS RETURNED ===")
+    for p in posters:
+        print(p)
 
-    with col1:
-        st.text(names[0])
-        st.image(posters[0])
-
-    with col2:
-        st.text(names[1])
-        st.image(posters[1])
-
-    with col3:
-        st.text(names[2])
-        st.image(posters[2])
-
-    with col4:
-        st.text(names[3])
-        st.image(posters[3])
-
-    with col5:
-        st.text(names[4])
-        st.image(posters[4])
+    cols = st.columns(5)
+    for i in range(5):
+        with cols[i]:
+            st.text(names[i])
+            st.image(posters[i], use_column_width=True)
